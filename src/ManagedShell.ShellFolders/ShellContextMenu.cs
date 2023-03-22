@@ -16,21 +16,21 @@ namespace ManagedShell.ShellFolders
         // Properties
         protected List<ShellNewMenuCommand> ShellNewMenus = new List<ShellNewMenuCommand>();
         
-        internal IContextMenu iContextMenu;
-        internal IContextMenu2 iContextMenu2;
-        internal IContextMenu3 iContextMenu3;
+        protected IContextMenu iContextMenu;
+        protected IContextMenu2 iContextMenu2;
+        protected IContextMenu3 iContextMenu3;
 
-        internal IntPtr iContextMenuPtr;
-        internal IntPtr iContextMenu2Ptr;
-        internal IntPtr iContextMenu3Ptr;
+        protected IntPtr iContextMenuPtr;
+        protected IntPtr iContextMenu2Ptr;
+        protected IntPtr iContextMenu3Ptr;
 
-        internal IntPtr nativeMenuPtr;
+        protected IntPtr nativeMenuPtr;
 
         protected int x;
         protected int y;
 
         #region Helpers
-        internal void FreeResources()
+        protected void FreeResources()
         {
             if (iContextMenu != null)
             {
@@ -154,7 +154,8 @@ namespace ManagedShell.ShellFolders
         /// <param name="workingDir">the parent directory from where to invoke</param>
         /// <param name="cmd">the index of the command to invoke</param>
         /// <param name="ptInvoke">the point (in screen coordinates) from which to invoke</param>
-        protected void InvokeCommand(IContextMenu iContextMenu, string workingDir, uint cmd, Point ptInvoke)
+        /// <returns>result of native InvokeCommand</returns>
+        protected int InvokeCommand(IContextMenu iContextMenu, string workingDir, uint cmd, Point ptInvoke)
         {
             CMINVOKECOMMANDINFOEX invoke = new CMINVOKECOMMANDINFOEX();
             invoke.cbSize = Interop.cbInvokeCommand;
@@ -168,7 +169,7 @@ namespace ManagedShell.ShellFolders
             invoke.ptInvoke = new NativeMethods.POINT(ptInvoke.X, ptInvoke.Y);
             invoke.nShow = NativeMethods.WindowShowStyle.ShowNormal;
 
-            iContextMenu.InvokeCommand(ref invoke);
+            return iContextMenu.InvokeCommand(ref invoke);
         }
         #endregion
 
