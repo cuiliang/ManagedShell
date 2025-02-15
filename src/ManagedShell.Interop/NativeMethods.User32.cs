@@ -237,7 +237,7 @@ namespace ManagedShell.Interop
         public struct SHELLHOOKINFO
         {
             public IntPtr hwnd;
-            public Rect rc;
+            public ShortRect rc;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -1546,7 +1546,12 @@ namespace ManagedShell.Interop
             /// <summary>
             /// Not implemented.
             /// </summary>
-            SPI_SETFONTSMOOTHINGORIENTATION = 0x2013,
+            SETFONTSMOOTHINGORIENTATION = 0x2013,
+
+            /// <summary>
+            /// Retrieves the time that notification pop-ups should be displayed, in seconds.
+            /// </summary>
+            GETMESSAGEDURATION = 0x2016,
         }
 
         [Flags]
@@ -1685,12 +1690,18 @@ namespace ManagedShell.Interop
         [DllImport(User32_DllName)]
         public static extern bool SystemParametersInfo(SPI uiAction, uint uiParam, IntPtr pvParam, SPIF fWinIni);
 
+        [DllImport(User32_DllName)]
+        public static extern bool SystemParametersInfo(SPI uiAction, uint uiParam, ref uint pvParam, SPIF fWinIni);
+
         [DllImport(User32_DllName, SetLastError = true)]
         public static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
 
         [DllImport(User32_DllName)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport(User32_DllName)]
+        public static extern bool IsWindowEnabled(IntPtr hWnd);
 
         [DllImport(User32_DllName)]
         public static extern IntPtr SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
@@ -1890,6 +1901,9 @@ namespace ManagedShell.Interop
         [DllImport(User32_DllName, SetLastError = true)]
         public static extern IntPtr RemoveProp(IntPtr hWnd, string lpString);
 
+        [DllImport(User32_DllName, SetLastError = true)]
+        public static extern IntPtr GetProp(IntPtr hWnd, string lpString);
+
         public enum TBPFLAG
         {
             TBPF_NOPROGRESS = 0,
@@ -1908,6 +1922,7 @@ namespace ManagedShell.Interop
         public static IntPtr HWND_BROADCAST = new IntPtr(0xffff);
         public static int WINEVENT_OUTOFCONTEXT = 0;
         public static int WINEVENT_SKIPOWNPROCESS = 2;
+        public static int EVENT_OBJECT_CLOAKED = 0x8017;
         public static int EVENT_OBJECT_UNCLOAKED = 0x8018;
         public static int EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
 
@@ -2901,7 +2916,19 @@ namespace ManagedShell.Interop
             /// </summary>
             ENDTASK = 10,
             FLASH = (REDRAW | HSHELL_HIGHBIT),
-            RUDEAPPACTIVATED = (WINDOWACTIVATED | HSHELL_HIGHBIT)
+            RUDEAPPACTIVATED = (WINDOWACTIVATED | HSHELL_HIGHBIT),
+            /// <summary>
+            /// A window has moved to another monitor. Windows 8 and newer only.
+            /// </summary>
+            MONITORCHANGED = 16,
+            /// <summary>
+            /// A window has become full-screen. Windows 8 and newer only.
+            /// </summary>
+            FULLSCREENENTER = 53,
+            /// <summary>
+            /// A window has left full-screen. Windows 8 and newer only.
+            /// </summary>
+            FULLSCREENEXIT = 54
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
@@ -3005,6 +3032,9 @@ namespace ManagedShell.Interop
 
         [DllImport(User32_DllName)]
         public static extern bool PostMessage(int hWnd, uint msg, int wParam, long lParam);
+
+        [DllImport(User32_DllName)]
+        public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         public enum KLF : uint
         {
@@ -3717,5 +3747,33 @@ namespace ManagedShell.Interop
 
         [DllImport(User32_DllName)]
         public static extern IntPtr MonitorFromWindow(IntPtr hWnd, int dwFlags);
+
+        public const int DBT_DEVICEARRIVAL = 0x8000;
+        public const int DBT_DEVICEQUERYREMOVE = 0x8001;
+        public const int DBT_DEVICEQUERYREMOVEFAILED = 0x8002;
+        public const int DBT_DEVICEREMOVECOMPLETE = 0x8004;
+        public const int DBT_DEVTYP_VOLUME = 0x2;
+        public const int DBT_DEVTYP_HANDLE = 0x6;
+        public const int FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DEV_BROADCAST_HANDLE
+        {
+            public int dbch_size;
+            public int dbch_devicetype;
+            public int dbch_reserved;
+            public IntPtr dbch_handle;
+            public IntPtr dbch_hdevnotify;
+            public Guid dbch_eventguid;
+            public int dbch_nameoffset;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1, ArraySubType = UnmanagedType.I1)]
+            public byte[] dbch_data;
+        }
+
+        [DllImport(User32_DllName, CharSet = CharSet.Auto, SetLastError = true)]
+        public static extern IntPtr RegisterDeviceNotification(IntPtr recipient, IntPtr notificationFilter, int flags);
+
+        [DllImport(User32_DllName)]
+        public static extern bool UnregisterDeviceNotification(IntPtr handle);
     }
 }

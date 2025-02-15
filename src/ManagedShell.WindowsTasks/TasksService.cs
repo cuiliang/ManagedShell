@@ -1,6 +1,5 @@
 ﻿using ManagedShell.Common.Helpers;
 using ManagedShell.Common.Logging;
-using ManagedShell.Interop;
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -18,7 +17,13 @@ namespace ManagedShell.WindowsTasks
     public class TasksService : DependencyObject, IDisposable
     {
         public static readonly IconSize DEFAULT_ICON_SIZE = IconSize.Small;
-        
+
+        public event EventHandler<WindowEventArgs> WindowActivated;
+        public event EventHandler<EventArgs> DesktopActivated;
+        public event EventHandler<EventArgs> FullScreenEntered;
+        public event EventHandler<EventArgs> FullScreenLeft;
+        public event EventHandler<WindowEventArgs> MonitorChanged;
+
         private NativeWindowEx _HookWin;
         private object _windowsLock = new object();
         internal bool IsInitialized;
@@ -27,8 +32,8 @@ namespace ManagedShell.WindowsTasks
         private static int WM_SHELLHOOKMESSAGE = -1;
         private static int WM_TASKBARCREATEDMESSAGE = -1;
         private static int TASKBARBUTTONCREATEDMESSAGE = -1;
-        private static IntPtr uncloakEventHook = IntPtr.Zero;
-        private WinEventProc uncloakEventProc;
+        private static IntPtr cloakEventHook = IntPtr.Zero;
+        private WinEventProc cloakEventProc;
         private static IntPtr moveEventHook = IntPtr.Zero;
         private WinEventProc moveEventProc;
 
@@ -100,25 +105,26 @@ namespace ManagedShell.WindowsTasks
 
                 if (EnvironmentHelper.IsWindows8OrBetter)
                 {
-                    // set event hook for uncloak events
-                    uncloakEventProc = UncloakEventCallback;
+                    // set event hook for cloak/uncloak events
+                    cloakEventProc = CloakEventCallback;
 
-                    if (uncloakEventHook == IntPtr.Zero)
+                    if (cloakEventHook == IntPtr.Zero)
                     {
-                        uncloakEventHook = SetWinEventHook(
-                            EVENT_OBJECT_UNCLOAKED,
+                        cloakEventHook = SetWinEventHook(
+                            EVENT_OBJECT_CLOAKED,
                             EVENT_OBJECT_UNCLOAKED,
                             IntPtr.Zero,
-                            uncloakEventProc,
+                            cloakEventProc,
                             0,
                             0,
                             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
                     }
                 }
 
-                if (withMultiMonTracking)
+                if (withMultiMonTracking && !EnvironmentHelper.IsWindows8OrBetter)
                 {
                     // set event hook for move events
+                    // In Windows 8 and newer, use HSHELL_MONITORCHANGED instead
                     moveEventProc = MoveEventCallback;
 
                     if (moveEventHook == IntPtr.Zero)
@@ -194,7 +200,7 @@ namespace ManagedShell.WindowsTasks
             {
                 ShellLogger.Debug("TasksService: Deregistering hooks");
                 DeregisterShellHookWindow(_HookWin.Handle);
-                if (uncloakEventHook != IntPtr.Zero) UnhookWinEvent(uncloakEventHook);
+                if (cloakEventHook != IntPtr.Zero) UnhookWinEvent(cloakEventHook);
                 if (moveEventHook != IntPtr.Zero) UnhookWinEvent(moveEventHook);
                 _HookWin.DestroyHandle();
                 setTaskbarListHwnd(IntPtr.Zero);
@@ -263,7 +269,11 @@ namespace ManagedShell.WindowsTasks
             if (initialState != ApplicationWindow.WindowState.Inactive) win.State = initialState;
 
             // add window unless we need to validate it is eligible to show in taskbar
-            if (!sanityCheck || win.CanAddToTaskbar) Windows.Add(win);
+            if (!sanityCheck || win.CanAddToTaskbar)
+            {
+                Windows.Add(win);
+                ShellLogger.Debug($"TasksService: Added window {hWnd} ({win.Title})");
+            }
 
             // Only send TaskbarButtonCreated if we are shell, and if OS is not Server Core
             // This is because if Explorer is running, it will send the message, so we don't need to
@@ -281,6 +291,8 @@ namespace ManagedShell.WindowsTasks
                     ApplicationWindow win = Windows.First(wnd => wnd.Handle == hWnd);
                     win.Dispose();
                     Windows.Remove(win);
+
+                    ShellLogger.Debug($"TasksService: Removed window {hWnd} ({win.Title})");
                 }
                 while (Windows.Any(i => i.Handle == hWnd));
             }
@@ -289,6 +301,7 @@ namespace ManagedShell.WindowsTasks
         private void redrawWindow(ApplicationWindow win)
         {
             win.UpdateProperties();
+            ShellLogger.Debug($"TasksService: Updated window {win.Handle} ({win.Title})");
 
             foreach (ApplicationWindow wind in Windows)
             {
@@ -299,8 +312,10 @@ namespace ManagedShell.WindowsTasks
             }
         }
 
-        private void ShellWinProc(Message msg)
+        private void ShellWinProc(ref Message msg, ref bool handled)
         {
+            Message msgCopy = msg;
+            handled = true;
             if (msg.Msg == WM_SHELLHOOKMESSAGE)
             {
                 try
@@ -310,28 +325,25 @@ namespace ManagedShell.WindowsTasks
                         switch ((HSHELL)msg.WParam.ToInt32())
                         {
                             case HSHELL.WINDOWCREATED:
-                                ShellLogger.Debug("TasksService: Created: " + msg.LParam);
-                                if (!Windows.Any(i => i.Handle == msg.LParam))
+                                if (!Windows.Any(i => i.Handle == msgCopy.LParam))
                                 {
                                     addWindow(msg.LParam);
                                 }
                                 else
                                 {
-                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msg.LParam);
+                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
                                     win.UpdateProperties();
                                 }
                                 break;
 
                             case HSHELL.WINDOWDESTROYED:
-                                ShellLogger.Debug("TasksService: Destroyed: " + msg.LParam);
                                 removeWindow(msg.LParam);
                                 break;
 
                             case HSHELL.WINDOWREPLACING:
-                                ShellLogger.Debug("TasksService: Replacing: " + msg.LParam);
-                                if (Windows.Any(i => i.Handle == msg.LParam))
+                                if (Windows.Any(i => i.Handle == msgCopy.LParam))
                                 {
-                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msg.LParam);
+                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
                                     win.State = ApplicationWindow.WindowState.Inactive;
                                     win.SetShowInTaskbar();
                                 }
@@ -341,15 +353,12 @@ namespace ManagedShell.WindowsTasks
                                 }
                                 break;
                             case HSHELL.WINDOWREPLACED:
-                                ShellLogger.Debug("TasksService: Replaced: " + msg.LParam);
                                 // TODO: If a window gets replaced, we lose app-level state such as overlay icons.
                                 removeWindow(msg.LParam);
                                 break;
 
                             case HSHELL.WINDOWACTIVATED:
                             case HSHELL.RUDEAPPACTIVATED:
-                                ShellLogger.Debug("TasksService: Activated: " + msg.LParam);
-
                                 foreach (var aWin in Windows.Where(w => w.State == ApplicationWindow.WindowState.Active))
                                 {
                                     aWin.State = ApplicationWindow.WindowState.Inactive;
@@ -359,11 +368,12 @@ namespace ManagedShell.WindowsTasks
                                 {
                                     ApplicationWindow win = null;
 
-                                    if (Windows.Any(i => i.Handle == msg.LParam))
+                                    if (Windows.Any(i => i.Handle == msgCopy.LParam))
                                     {
-                                        win = Windows.First(wnd => wnd.Handle == msg.LParam);
+                                        win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
                                         win.State = ApplicationWindow.WindowState.Active;
                                         win.SetShowInTaskbar();
+                                        ShellLogger.Debug($"TasksService: Activated window {win.Handle} ({win.Title})");
                                     }
                                     else
                                     {
@@ -377,15 +387,25 @@ namespace ManagedShell.WindowsTasks
                                             if (wind.WinFileName == win.WinFileName && wind.Handle != win.Handle)
                                                 wind.SetShowInTaskbar();
                                         }
+
+                                        WindowEventArgs args = new WindowEventArgs
+                                        {
+                                            Window = win
+                                        };
+
+                                        WindowActivated?.Invoke(this, args);
                                     }
+                                }
+                                else
+                                {
+                                    DesktopActivated?.Invoke(this, new EventArgs());
                                 }
                                 break;
 
                             case HSHELL.FLASH:
-                                ShellLogger.Debug("TasksService: Flashing window: " + msg.LParam);
-                                if (Windows.Any(i => i.Handle == msg.LParam))
+                                if (Windows.Any(i => i.Handle == msgCopy.LParam))
                                 {
-                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msg.LParam);
+                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
                                     
                                     if (win.State != ApplicationWindow.WindowState.Active)
                                     {
@@ -405,23 +425,13 @@ namespace ManagedShell.WindowsTasks
                                 break;
 
                             case HSHELL.ENDTASK:
-                                ShellLogger.Debug("TasksService: EndTask called: " + msg.LParam);
                                 removeWindow(msg.LParam);
                                 break;
 
-                            case HSHELL.GETMINRECT:
-                                ShellLogger.Debug("TasksService: GetMinRect called: " + msg.LParam);
-                                SHELLHOOKINFO winHandle = (SHELLHOOKINFO)Marshal.PtrToStructure(msg.LParam, typeof(SHELLHOOKINFO));
-                                winHandle.rc = new NativeMethods.Rect { Bottom = 100, Left = 0, Right = 100, Top = 0 };
-                                Marshal.StructureToPtr(winHandle, msg.LParam, true);
-                                msg.Result = winHandle.hwnd;
-                                return; // return here so the result isnt reset to DefWindowProc
-
                             case HSHELL.REDRAW:
-                                ShellLogger.Debug("TasksService: Redraw called: " + msg.LParam);
-                                if (Windows.Any(i => i.Handle == msg.LParam))
+                                if (Windows.Any(i => i.Handle == msgCopy.LParam))
                                 {
-                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msg.LParam);
+                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
 
                                     if (win.State == ApplicationWindow.WindowState.Flashing)
                                     {
@@ -433,6 +443,48 @@ namespace ManagedShell.WindowsTasks
                                 else
                                 {
                                     addWindow(msg.LParam, ApplicationWindow.WindowState.Inactive, true);
+                                }
+                                break;
+
+                            case HSHELL.MONITORCHANGED:
+                                if (Windows.Any(i => i.Handle == msgCopy.LParam))
+                                {
+                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
+                                    win.SetMonitor();
+                                    ShellLogger.Debug($"TasksService: Monitor changed for {win.Handle} ({win.Title})");
+
+                                    WindowEventArgs args = new WindowEventArgs
+                                    {
+                                        Window = win
+                                    };
+
+                                    MonitorChanged?.Invoke(this, args);
+                                }
+                                break;
+
+                            case HSHELL.FULLSCREENENTER:
+                                FullScreenEntered?.Invoke(this, new EventArgs());
+                                break;
+
+                            case HSHELL.FULLSCREENEXIT:
+                                FullScreenLeft?.Invoke(this, new EventArgs());
+                                break;
+
+                            case HSHELL.GETMINRECT:
+                                SHELLHOOKINFO minRectInfo = Marshal.PtrToStructure<SHELLHOOKINFO>(msg.LParam);
+                                if (Windows.Any(i => i.Handle == minRectInfo.hwnd))
+                                {
+                                    ApplicationWindow win = Windows.First(wnd => wnd.Handle == minRectInfo.hwnd);
+                                    minRectInfo.rc = win.GetButtonRectFromShell();
+
+                                    if (minRectInfo.rc.Width <= 0 && minRectInfo.rc.Height <= 0)
+                                    {
+                                        break;
+                                    }
+                                    Marshal.StructureToPtr(minRectInfo, msg.LParam, false);
+                                    msg.Result = (IntPtr)1;
+                                    ShellLogger.Debug($"TasksService: MinRect {minRectInfo.rc.Width}x{minRectInfo.rc.Height} provided for {win.Handle} ({win.Title})");
+                                    return; // return here so the result isnt reset to DefWindowProc
                                 }
                                 break;
 
@@ -457,7 +509,7 @@ namespace ManagedShell.WindowsTasks
                 ShellLogger.Debug("TasksService: TaskbarCreated received, setting ITaskbarList window");
                 setTaskbarListHwnd(_HookWin.Handle);
             }
-            else
+            else if (msg.Msg >= (int)WM.USER)
             {
                 // Handle ITaskbarList functions, most not implemented yet
 
@@ -473,7 +525,16 @@ namespace ManagedShell.WindowsTasks
                         return;
                     case (int)WM.USER + 60:
                         // MarkFullscreenWindow
+                        // Also sends WM_SHELLHOOK message
                         ShellLogger.Debug("TasksService: ITaskbarList: MarkFullscreenWindow HWND:" + msg.LParam + " Entering? " + msg.WParam);
+                        if (msg.WParam == IntPtr.Zero)
+                        {
+                            FullScreenLeft?.Invoke(this, new EventArgs());
+                        }
+                        else
+                        {
+                            FullScreenEntered?.Invoke(this, new EventArgs());
+                        }
                         msg.Result = IntPtr.Zero;
                         return;
                     case (int)WM.USER + 64:
@@ -483,7 +544,7 @@ namespace ManagedShell.WindowsTasks
                         win = new ApplicationWindow(this, msg.WParam);
                         if (Windows.Contains(win))
                         {
-                            win = Windows.First(wnd => wnd.Handle == msg.WParam);
+                            win = Windows.First(wnd => wnd.Handle == msgCopy.WParam);
                             win.ProgressValue = (int)msg.LParam;
                         }
 
@@ -496,7 +557,7 @@ namespace ManagedShell.WindowsTasks
                         win = new ApplicationWindow(this, msg.WParam);
                         if (Windows.Contains(win))
                         {
-                            win = Windows.First(wnd => wnd.Handle == msg.WParam);
+                            win = Windows.First(wnd => wnd.Handle == msgCopy.WParam);
                             win.ProgressState = (TBPFLAG)msg.LParam;
                         }
 
@@ -549,7 +610,7 @@ namespace ManagedShell.WindowsTasks
                         win = new ApplicationWindow(this, msg.WParam);
                         if (Windows.Contains(win))
                         {
-                            win = Windows.First(wnd => wnd.Handle == msg.WParam);
+                            win = Windows.First(wnd => wnd.Handle == msgCopy.WParam);
                             win.SetOverlayIcon(msg.LParam);
                         }
 
@@ -572,7 +633,7 @@ namespace ManagedShell.WindowsTasks
                         win = new ApplicationWindow(this, msg.WParam);
                         if (Windows.Contains(win))
                         {
-                            win = Windows.First(wnd => wnd.Handle == msg.WParam);
+                            win = Windows.First(wnd => wnd.Handle == msgCopy.WParam);
                             win.SetOverlayIconDescription(msg.LParam);
                         }
 
@@ -583,10 +644,13 @@ namespace ManagedShell.WindowsTasks
                         ShellLogger.Debug("TasksService: ITaskbarList: SetTabProperties HWND:" + msg.WParam);
                         msg.Result = IntPtr.Zero;
                         return;
+                    default:
+                        ShellLogger.Debug($"TasksService: Unknown ITaskbarList Msg: {msg.Msg} LParam: {msg.LParam} WParam: {msg.WParam}");
+                        break;
                 }
             }
 
-            msg.Result = DefWindowProc(msg.HWnd, msg.Msg, msg.WParam, msg.LParam);
+            handled = false;
         }
 
         private void MoveEventCallback(IntPtr hWinEventHook, uint eventType, IntPtr hWnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
@@ -601,14 +665,15 @@ namespace ManagedShell.WindowsTasks
             }
         }
 
-        private void UncloakEventCallback(IntPtr hWinEventHook, uint eventType, IntPtr hWnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        private void CloakEventCallback(IntPtr hWinEventHook, uint eventType, IntPtr hWnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
         {
             if (hWnd != IntPtr.Zero && idObject == 0 && idChild == 0)
             {
                 if (Windows.Any(i => i.Handle == hWnd))
                 {
                     ApplicationWindow win = Windows.First(wnd => wnd.Handle == hWnd);
-                    win.Uncloak();
+                    ShellLogger.Debug($"TasksService: {(eventType == EVENT_OBJECT_CLOAKED ? "Cloak" : "Uncloak")} event received for {win.Title}");
+                    win.SetShowInTaskbar();
                 }
             }
         }

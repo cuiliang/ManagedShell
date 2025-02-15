@@ -7,6 +7,7 @@ using System.Text;
 using ManagedShell.Common.Logging;
 using static ManagedShell.Interop.NativeMethods;
 using ManagedShell.Common.Enums;
+using ManagedShell.Common.Interfaces;
 
 namespace ManagedShell.Common.Helpers
 {
@@ -49,6 +50,21 @@ namespace ManagedShell.Common.Helpers
             {
                 // No 'Open' command associated with this filetype in the registry
                 ShowOpenWithDialog(proc.StartInfo.FileName);
+                return false;
+            }
+        }
+
+        public static bool ActivateApplication(string appUserModelId, string args = "")
+        {
+            var aam = new ApplicationActivationManager() as IApplicationActivationManager;
+            try
+            {
+                aam.ActivateApplication(appUserModelId, args, ActivateOptions.None);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShellLogger.Error($"Error activating application {appUserModelId} with args \"{args}\". ({ex.Message})");
                 return false;
             }
         }
@@ -184,7 +200,7 @@ namespace ManagedShell.Common.Helpers
             owProc.StartInfo.UseShellExecute = true;
             owProc.StartInfo.FileName = Environment.GetEnvironmentVariable("WINDIR") + @"\system32\rundll32.exe";
             owProc.StartInfo.Arguments =
-                @"C:\WINDOWS\system32\shell32.dll,OpenAs_RunDLL " + fileName;
+                Environment.GetEnvironmentVariable("WINDIR") + @"\system32\shell32.dll,OpenAs_RunDLL " + fileName;
             owProc.Start();
         }
 
@@ -387,6 +403,7 @@ namespace ManagedShell.Common.Helpers
                 StringBuilder outAumid = new StringBuilder((int)len);
 
                 GetApplicationUserModelId(hProcess, ref len, outAumid);
+                CloseHandle((int)hProcess);
 
                 if (outAumid.Length > 0)
                 {

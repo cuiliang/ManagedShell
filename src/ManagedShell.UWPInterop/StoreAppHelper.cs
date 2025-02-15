@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml;
 using ManagedShell.Common.Enums;
@@ -106,7 +105,8 @@ namespace ManagedShell.UWPInterop
                 ExtraLargeIconPath = icons[IconSize.ExtraLarge],
                 JumboIconPath = icons[IconSize.Jumbo],
                 IconColor = getPlateColor(icons[IconSize.Small], appNode, xmlnsManager),
-                EntryPoint = getEntryPoint(appNode, xmlnsManager)
+                EntryPoint = getEntryPoint(appNode, xmlnsManager),
+                HostId = getHostId(appNode, xmlnsManager)
             };
 
             return storeApp;
@@ -132,6 +132,7 @@ namespace ManagedShell.UWPInterop
             xmlnsManager.AddNamespace("uap3", "http://schemas.microsoft.com/appx/manifest/uap/windows10/3");
             xmlnsManager.AddNamespace("uap4", "http://schemas.microsoft.com/appx/manifest/uap/windows10/4");
             xmlnsManager.AddNamespace("uap5", "http://schemas.microsoft.com/appx/manifest/uap/windows10/5");
+            xmlnsManager.AddNamespace("uap10", "http://schemas.microsoft.com/appx/manifest/uap/windows10/10");
 
             return xmlnsManager;
         }
@@ -143,7 +144,7 @@ namespace ManagedShell.UWPInterop
             if (node == null && nodeText.Contains("uap:"))
             {
                 int i = 0;
-                string[] namespaces = { "uap:", "uap2:", "uap3:", "uap4:", "uap5:" };
+                string[] namespaces = { "uap:", "uap2:", "uap3:", "uap4:", "uap5:", "uap10:" };
                 while (node == null && i <= 3)
                 {
                     nodeText = nodeText.Replace(namespaces[i], namespaces[i + 1]);
@@ -183,6 +184,11 @@ namespace ManagedShell.UWPInterop
         private static string getEntryPoint(XmlNode app, XmlNamespaceManager xmlnsManager)
         {
             return app.SelectSingleNode("@EntryPoint", xmlnsManager)?.Value;
+        }
+
+        private static string getHostId(XmlNode app, XmlNamespaceManager xmlnsManager)
+        {
+            return app.SelectSingleNode("@uap10:HostId", xmlnsManager)?.Value;
         }
 
         private static string getPlateColor(string iconPath, XmlNode app, XmlNamespaceManager xmlnsManager)
@@ -388,14 +394,11 @@ namespace ManagedShell.UWPInterop
             return null;
         }
 
-        [DllImport("shlwapi.dll", BestFitMapping = false, CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = false, ThrowOnUnmappableChar = true)]
-        private static extern int SHLoadIndirectString(string pszSource, StringBuilder pszOutBuf, int cchOutBuf, IntPtr ppvReserved);
-
         internal static string ExtractStringFromPRIFile(string pathToPRI, string resourceKey)
         {
             string sWin8ManifestString = $"@{{{pathToPRI}? {resourceKey}}}";
             var outBuff = new StringBuilder(256);
-            int result = SHLoadIndirectString(sWin8ManifestString, outBuff, outBuff.Capacity, IntPtr.Zero);
+            int result = Interop.NativeMethods.SHLoadIndirectString(sWin8ManifestString, outBuff, outBuff.Capacity, IntPtr.Zero);
             return outBuff.ToString();
         }
     }

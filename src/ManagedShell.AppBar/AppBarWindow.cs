@@ -7,6 +7,8 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Application = System.Windows.Application;
 
@@ -17,9 +19,26 @@ namespace ManagedShell.AppBar
         protected readonly AppBarManager _appBarManager;
         protected readonly ExplorerHelper _explorerHelper;
         protected readonly FullScreenHelper _fullScreenHelper;
+
         public AppBarScreen Screen;
-        public double DpiScale = 1.0;
         protected bool ProcessScreenChanges = true;
+
+        private double _dpiScale = 1.0;
+        public double DpiScale
+        {
+            get
+            {
+                return _dpiScale;
+            }
+            set
+            {
+                if (_dpiScale != value)
+                {
+                    _dpiScale = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
 
         // Window properties
         private WindowInteropHelper helper;
@@ -34,6 +53,7 @@ namespace ManagedShell.AppBar
 
         // AppBar properties
         private int AppBarMessageId = -1;
+        private NativeMethods.Rect _lastAppBarRect;
 
         private AppBarEdge _appBarEdge;
         public AppBarEdge AppBarEdge
@@ -49,15 +69,54 @@ namespace ManagedShell.AppBar
                 OnPropertyChanged("Orientation");
             }
         }
-        protected internal bool EnableAppBar = true;
+        private AppBarMode _appBarMode;
+        public AppBarMode AppBarMode
+        {
+            get
+            {
+                return _appBarMode;
+            }
+            set
+            {
+                _appBarMode = value;
+                OnPropertyChanged();
+            }
+        }
+        private FrameworkElement _autoHideElement;
+        public FrameworkElement AutoHideElement
+        {
+            get
+            {
+                return _autoHideElement;
+            }
+            set
+            {
+                _autoHideElement = value;
+                OnPropertyChanged();
+            }
+        }
+        public bool AllowAutoHide
+        {
+            get => ShouldAllowAutoHide();
+        }
         protected internal bool RequiresScreenEdge;
+        protected double AutoHideShowMargin = 2;
+        protected double AutoHideDelayMs = 400;
+        protected double AutoHideShowDelayMs = 0;
+        protected double AutoHideAnimationMs = 300;
+        protected double AutoHideShowAnimationMs = 150;
+
+        private bool _isDragWithin;
+        private bool _isMouseWithin;
+        private bool _isContextMenuOpen;
+        private DispatcherTimer _peekAutoHideTimer;
 
         public Orientation Orientation
         {
             get => (AppBarEdge == AppBarEdge.Left || AppBarEdge == AppBarEdge.Right) ? Orientation.Vertical : Orientation.Horizontal;
         }
 
-        public AppBarWindow(AppBarManager appBarManager, ExplorerHelper explorerHelper, FullScreenHelper fullScreenHelper, AppBarScreen screen, AppBarEdge edge, double size)
+        public AppBarWindow(AppBarManager appBarManager, ExplorerHelper explorerHelper, FullScreenHelper fullScreenHelper, AppBarScreen screen, AppBarEdge edge, AppBarMode mode, double size)
         {
             _explorerHelper = explorerHelper;
             _fullScreenHelper = fullScreenHelper;
@@ -65,6 +124,15 @@ namespace ManagedShell.AppBar
 
             Closing += OnClosing;
             SourceInitialized += OnSourceInitialized;
+
+            PreviewDragEnter += AppBarWindow_PreviewDragEnter;
+            PreviewDragLeave += AppBarWindow_PreviewDragLeave;
+            PreviewDrop += AppBarWindow_PreviewDrop;
+            MouseEnter += AppBarWindow_MouseEnter;
+            MouseLeave += AppBarWindow_MouseLeave;
+            ContextMenuOpening += AppBarWindow_ContextMenuOpening;
+            ContextMenuClosing += AppBarWindow_ContextMenuClosing;
+            PropertyChanged += AppBarWindow_PropertyChanged;
 
             ResizeMode = ResizeMode.NoResize;
             ShowInTaskbar = false;
@@ -75,6 +143,7 @@ namespace ManagedShell.AppBar
 
             Screen = screen;
             AppBarEdge = edge;
+            AppBarMode = mode;
 
             if (Orientation == Orientation.Vertical)
             {
@@ -84,6 +153,121 @@ namespace ManagedShell.AppBar
             {
                 DesiredHeight = size;
             }
+        }
+
+        private void AppBarWindow_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (IsOpening)
+            {
+                return;
+            }
+
+            if (e.PropertyName == "AllowAutoHide")
+            {
+                if (AllowAutoHide)
+                {
+                    AnimateAutoHide(true);
+                }
+                else
+                {
+                    AnimateAutoHide(false);
+                }
+            }
+            else if (e.PropertyName == "AppBarMode")
+            {
+                if (AppBarMode == AppBarMode.Normal)
+                {
+                    RegisterAppBar();
+                }
+                else
+                {
+                    UnregisterAppBar();
+                }
+
+                if (AppBarMode == AppBarMode.AutoHide)
+                {
+                    _appBarManager.RegisterAutoHideBar(this);
+                    OnPropertyChanged("AllowAutoHide");
+                }
+                else
+                {
+                    _appBarManager.UnregisterAutoHideBar(this);
+                    AnimateAutoHide(false, true);
+                }
+            }
+        }
+
+        private void AnimateAutoHide(bool isHiding, bool immediate = false)
+        {
+            if (AutoHideElement == null)
+            {
+                return;
+            }
+
+            if (isHiding && AppBarMode != AppBarMode.AutoHide)
+            {
+                return;
+            }
+
+            double animTo = 0;
+
+            if (isHiding)
+            {
+                animTo = Orientation == Orientation.Horizontal ? DesiredHeight : DesiredWidth;
+                animTo -= AutoHideShowMargin;
+
+                if (AppBarEdge == AppBarEdge.Top || AppBarEdge == ((FlowDirection == FlowDirection.LeftToRight) ? AppBarEdge.Left : AppBarEdge.Right))
+                {
+                    animTo *= -1;
+                }
+            }
+
+            var animation = new DoubleAnimation(animTo, TimeSpan.FromMilliseconds(isHiding ? AutoHideAnimationMs : AutoHideShowAnimationMs).Duration());
+            animation.BeginTime = TimeSpan.FromMilliseconds(immediate ? 0 : isHiding ? AutoHideDelayMs : AutoHideShowDelayMs);
+            animation.EasingFunction = new SineEase();
+
+            Storyboard.SetTarget(animation, AutoHideElement);
+            Storyboard.SetTargetProperty(animation, new PropertyPath($"RenderTransform.(TranslateTransform.{(Orientation == Orientation.Horizontal ? 'Y' : 'X')})"));
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(animation);
+
+            animation.CurrentStateInvalidated += (object sender, EventArgs e) => {
+                if (((AnimationClock)sender).CurrentState == ClockState.Active)
+                {
+                    OnAutoHideAnimationBegin(isHiding);
+                }
+            };
+
+            storyboard.Completed += (object sender, EventArgs e) => {
+                OnAutoHideAnimationComplete(isHiding);
+            };
+
+            storyboard.Begin(AutoHideElement);
+        }
+
+        protected void PeekDuringAutoHide(int msToPeek = 1000)
+        {
+            if (AppBarMode != AppBarMode.AutoHide)
+            {
+                return;
+            }
+
+            _peekAutoHideTimer?.Stop();
+
+            AnimateAutoHide(false, true);
+
+            _peekAutoHideTimer = new DispatcherTimer();
+            _peekAutoHideTimer.Interval = TimeSpan.FromMilliseconds(msToPeek);
+            _peekAutoHideTimer.Tick += (object sender, EventArgs e) =>
+            {
+                _peekAutoHideTimer?.Stop();
+                if (AllowAutoHide)
+                {
+                    AnimateAutoHide(true, true);
+                }
+            };
+            _peekAutoHideTimer.Start();
         }
 
         #region Events
@@ -114,7 +298,14 @@ namespace ManagedShell.AppBar
                 DelaySetPosition();
             }
 
-            RegisterAppBar();
+            if (AppBarMode == AppBarMode.Normal)
+            {
+                RegisterAppBar();
+            }
+            else if (AppBarMode == AppBarMode.AutoHide)
+            {
+                _appBarManager.RegisterAutoHideBar(this);
+            }
 
             // hide from alt-tab etc
             WindowHelper.HideWindowFromTasks(Handle);
@@ -123,6 +314,25 @@ namespace ManagedShell.AppBar
             _fullScreenHelper.FullScreenApps.CollectionChanged += FullScreenApps_CollectionChanged;
 
             IsOpening = false;
+            OnPropertyChanged("AllowAutoHide");
+        }
+
+        protected virtual void OnAutoHideAnimationBegin(bool isHiding)
+        {
+            if (isHiding && EnableBlur && Handle != IntPtr.Zero && AllowsTransparency && AllowAutoHide)
+            {
+                // Disable blur if enabled and hiding
+                WindowHelper.SetWindowBlur(Handle, false);
+            }
+        }
+
+        protected virtual void OnAutoHideAnimationComplete(bool isHiding)
+        {
+            if (!isHiding && EnableBlur && Handle != IntPtr.Zero && AllowsTransparency && !AllowAutoHide)
+            {
+                // Re-enable blur if enabled and showing
+                WindowHelper.SetWindowBlur(Handle, true);
+            }
         }
 
         private void OnClosing(object sender, CancelEventArgs e)
@@ -134,6 +344,7 @@ namespace ManagedShell.AppBar
             if (AllowClose)
             {
                 UnregisterAppBar();
+                _appBarManager.UnregisterAutoHideBar(this);
 
                 // unregister full-screen notifications
                 _fullScreenHelper.FullScreenApps.CollectionChanged -= FullScreenApps_CollectionChanged;
@@ -169,6 +380,45 @@ namespace ManagedShell.AppBar
             }
         }
 
+        private void AppBarWindow_ContextMenuClosing(object sender, ContextMenuEventArgs e)
+        {
+            SetAutoHideStateVar(ref _isContextMenuOpen, false);
+        }
+
+        private void AppBarWindow_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+        {
+            // ContextMenuOpening fires even if the element has no context menu defined, so we must check
+            if (HasContextMenu(e.OriginalSource as FrameworkElement))
+            {
+                SetAutoHideStateVar(ref _isContextMenuOpen, true);
+            }
+        }
+
+        private void AppBarWindow_PreviewDragEnter(object sender, DragEventArgs e)
+        {
+            SetAutoHideStateVar(ref _isDragWithin, true);
+        }
+
+        private void AppBarWindow_PreviewDragLeave(object sender, DragEventArgs e)
+        {
+            SetAutoHideStateVar(ref _isDragWithin, false);
+        }
+
+        private void AppBarWindow_PreviewDrop(object sender, DragEventArgs e)
+        {
+            SetAutoHideStateVar(ref _isDragWithin, false);
+        }
+
+        private void AppBarWindow_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            SetAutoHideStateVar(ref _isMouseWithin, true);
+        }
+
+        private void AppBarWindow_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            SetAutoHideStateVar(ref _isMouseWithin, false);
+        }
+
         protected virtual IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == AppBarMessageId && AppBarMessageId != -1)
@@ -200,7 +450,7 @@ namespace ManagedShell.AppBar
                 }
                 handled = true;
             }
-            else if (msg == (int)NativeMethods.WM.ACTIVATE && EnableAppBar && !EnvironmentHelper.IsAppRunningAsShell && !AllowClose)
+            else if (msg == (int)NativeMethods.WM.ACTIVATE && AppBarMode == AppBarMode.Normal && !EnvironmentHelper.IsAppRunningAsShell && !AllowClose)
             {
                 _appBarManager.AppBarActivate(hwnd);
             }
@@ -218,7 +468,7 @@ namespace ManagedShell.AppBar
                     wndPos.UpdateMessage(lParam);
                 }
             }
-            else if (msg == (int)NativeMethods.WM.WINDOWPOSCHANGED && EnableAppBar && !EnvironmentHelper.IsAppRunningAsShell && !AllowClose)
+            else if (msg == (int)NativeMethods.WM.WINDOWPOSCHANGED && AppBarMode == AppBarMode.Normal && !EnvironmentHelper.IsAppRunningAsShell && !AllowClose)
             {
                 _appBarManager.AppBarWindowPosChanged(hwnd);
             }
@@ -231,8 +481,9 @@ namespace ManagedShell.AppBar
                     DpiHelper.DpiScale = DpiScale;
                 }
 
-                // suppress this if we are opening, because we're getting this message as a result of positioning
-                if (!IsOpening)
+                // if we are opening, we're getting this message as a result of positioning
+                // if we are an AppBar, that code will fix our position, so skip in that case to prevent infinite resizing.
+                if (!IsOpening || AppBarMode != AppBarMode.Normal)
                 {
                     ProcessScreenChange(ScreenSetupReason.DpiChange);
                 }
@@ -274,11 +525,11 @@ namespace ManagedShell.AppBar
         public void SetScreenPosition()
         {
             // set our position if running as shell, otherwise let AppBar do the work
-            if (EnvironmentHelper.IsAppRunningAsShell || !EnableAppBar)
+            if (EnvironmentHelper.IsAppRunningAsShell || AppBarMode != AppBarMode.Normal)
             {
                 DelaySetPosition();
             }
-            else if (EnableAppBar)
+            else if (AppBarMode == AppBarMode.Normal)
             {
                 if (Orientation == Orientation.Vertical)
                 {
@@ -293,10 +544,25 @@ namespace ManagedShell.AppBar
 
         internal void SetAppBarPosition(NativeMethods.Rect rect)
         {
-            Top = rect.Top / DpiScale;
-            Left = rect.Left / DpiScale;
-            if (rect.Width >= 0) Width = rect.Width / DpiScale;
-            if (rect.Height >= 0) Height = rect.Height / DpiScale;
+            int swp = (int)NativeMethods.SetWindowPosFlags.SWP_NOZORDER | (int)NativeMethods.SetWindowPosFlags.SWP_NOACTIVATE;
+
+            if (rect.Width < 0 || rect.Height < 0)
+            {
+                swp |= (int)NativeMethods.SetWindowPosFlags.SWP_NOSIZE;
+            }
+
+            NativeMethods.SetWindowPos(Handle, IntPtr.Zero, rect.Left, rect.Top, rect.Width, rect.Height, swp);
+        }
+
+        private void SetAutoHideStateVar(ref bool varToSet, bool newValue)
+        {
+            bool currentAutoHide = AllowAutoHide;
+            varToSet = newValue;
+
+            if (AllowAutoHide != currentAutoHide)
+            {
+                OnPropertyChanged("AllowAutoHide");
+            }
         }
 
         private void ProcessScreenChange(ScreenSetupReason reason)
@@ -330,18 +596,43 @@ namespace ManagedShell.AppBar
             }
         }
 
+        private bool HasContextMenu(FrameworkElement fe)
+        {
+            if (fe == null)
+            {
+                return false;
+            }
+
+            if (fe.ContextMenu != null)
+            {
+                return true;
+            }
+            else
+            {
+                var parent = VisualTreeHelper.GetParent(fe) as FrameworkElement;
+                return HasContextMenu(parent);
+            }
+        }
+
         protected void SetBlur(bool enable)
         {
             if (EnableBlur != enable && Handle != IntPtr.Zero && AllowsTransparency)
             {
                 EnableBlur = enable;
+
+                if (enable && AppBarMode == AppBarMode.AutoHide && AllowAutoHide)
+                {
+                    // If we're auto-hidden, don't actually enable blur right now.
+                    return;
+                }
+
                 WindowHelper.SetWindowBlur(Handle, enable);
             }
         }
 
         protected void RegisterAppBar()
         {
-            if (!EnableAppBar || _appBarManager.AppBars.Contains(this))
+            if (AppBarMode != AppBarMode.Normal || _appBarManager.AppBars.Contains(this))
             {
                 return;
             }
@@ -377,18 +668,24 @@ namespace ManagedShell.AppBar
         #region Virtual methods
         public virtual void AfterAppBarPos(bool isSameCoords, NativeMethods.Rect rect)
         {
+            _lastAppBarRect = rect;
             if (!isSameCoords)
             {
                 var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.1) };
                 timer.Tick += (sender1, args) =>
                 {
                     // set position again, since WPF may have overridden the original change from AppBarHelper
-                    SetAppBarPosition(rect);
+                    SetAppBarPosition(_lastAppBarRect);
 
                     timer.Stop();
                 };
                 timer.Start();
             }
+        }
+
+        protected virtual bool ShouldAllowAutoHide()
+        {
+            return AppBarMode == AppBarMode.AutoHide && !_isMouseWithin && !_isContextMenuOpen && !_isDragWithin && (_peekAutoHideTimer == null || !_peekAutoHideTimer.IsEnabled);
         }
 
         protected virtual void CustomClosing() { }
@@ -397,13 +694,20 @@ namespace ManagedShell.AppBar
         {
             _fullScreenHelper.NotifyScreensChanged();
 
-            Screen = AppBarScreen.FromPrimaryScreen();
+            if (Screen.Primary && reason != ScreenSetupReason.DpiChange)
+            {
+                Screen = AppBarScreen.FromPrimaryScreen();
+            }
             SetScreenPosition();
         }
 
         public virtual void SetPosition()
         {
             double edgeOffset = 0;
+            int left;
+            int top;
+            int height;
+            int width;
 
             if (!RequiresScreenEdge)
             {
@@ -412,35 +716,37 @@ namespace ManagedShell.AppBar
 
             if (Orientation == Orientation.Vertical)
             {
-                Top = Screen.Bounds.Top / DpiScale;
-                Height = Screen.Bounds.Height / DpiScale;
-                Width = DesiredWidth;
+                top = Screen.Bounds.Top;
+                height = Screen.Bounds.Height;
+                width = Convert.ToInt32(DesiredWidth * DpiScale);
 
                 if (AppBarEdge == AppBarEdge.Left)
                 {
-                    Left = Screen.Bounds.Left / DpiScale + edgeOffset;
+                    left = Screen.Bounds.Left + Convert.ToInt32(edgeOffset * DpiScale);
                 }
                 else
                 {
-                    Left = Screen.Bounds.Right / DpiScale - Width - edgeOffset;
+                    left = Screen.Bounds.Right - width - Convert.ToInt32(edgeOffset * DpiScale);
                 }
             }
             else
             {
-                Left = Screen.Bounds.Left / DpiScale;
-                Width = Screen.Bounds.Width / DpiScale;
-                Height = DesiredHeight;
+                left = Screen.Bounds.Left;
+                width = Screen.Bounds.Width;
+                height = Convert.ToInt32(DesiredHeight * DpiScale);
 
                 if (AppBarEdge == AppBarEdge.Top)
                 {
-                    Top = (Screen.Bounds.Top / DpiScale) + edgeOffset;
+                    top = Screen.Bounds.Top + Convert.ToInt32(edgeOffset * DpiScale);
                 }
                 else
                 {
-                    Top = Screen.Bounds.Bottom / DpiScale - Height - edgeOffset;
+                    top = Screen.Bounds.Bottom - height - Convert.ToInt32(edgeOffset * DpiScale);
                 }
             }
-            
+
+            NativeMethods.SetWindowPos(Handle, IntPtr.Zero, left, top, width, height, (int)NativeMethods.SetWindowPosFlags.SWP_NOZORDER | (int)NativeMethods.SetWindowPosFlags.SWP_NOACTIVATE);
+
 
             if (EnvironmentHelper.IsAppRunningAsShell)
             {
@@ -451,7 +757,7 @@ namespace ManagedShell.AppBar
 
         #region INotifyPropertyChanged
         public event PropertyChangedEventHandler PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string propertyName = "")
+        protected void OnPropertyChanged([CallerMemberName] string propertyName = "")
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }

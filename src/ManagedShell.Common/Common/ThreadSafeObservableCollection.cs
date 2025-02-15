@@ -8,20 +8,23 @@ namespace ManagedShell.Common.Common
     {
 
         Dispatcher _dispatcher;
-        ReaderWriterLock _lock;
+        ReaderWriterLockSlim _lock;
         public ThreadSafeObservableCollection()
         {
             _dispatcher = Dispatcher.CurrentDispatcher;
-            _lock = new ReaderWriterLock();
+            _lock = new ReaderWriterLockSlim();
         }
 
         protected override void ClearItems()
         {
             if (_dispatcher.CheckAccess())
             {
-                LockCookie c = _lock.UpgradeToWriterLock(-1);
-                base.ClearItems();
-                _lock.DowngradeFromWriterLock(ref c);
+                try
+                {
+                    _lock.EnterWriteLock();
+                    base.ClearItems();
+                }
+                finally { _lock.ExitWriteLock(); }
             }
             else
             {
@@ -32,11 +35,13 @@ namespace ManagedShell.Common.Common
         {
             if (_dispatcher.CheckAccess())
             {
-                if (index > this.Count)
-                    return;
-                LockCookie c = _lock.UpgradeToWriterLock(-1);
-                base.InsertItem(index, item);
-                _lock.DowngradeFromWriterLock(ref c);
+                try
+                {
+                    _lock.EnterWriteLock();
+                    if (index >= 0 && index <= Count)
+                        base.InsertItem(index, item);
+                }
+                finally { _lock.ExitWriteLock(); }
             }
             else
             {
@@ -59,11 +64,13 @@ namespace ManagedShell.Common.Common
         {
             if (_dispatcher.CheckAccess())
             {
-                if (oldIndex >= this.Count | newIndex >= this.Count | oldIndex == newIndex)
-                    return;
-                LockCookie c = _lock.UpgradeToWriterLock(-1);
-                base.MoveItem(oldIndex, newIndex);
-                _lock.DowngradeFromWriterLock(ref c);
+                try
+                {
+                    _lock.EnterWriteLock();
+                    if (oldIndex < Count && newIndex < Count && oldIndex != newIndex)
+                        base.MoveItem(oldIndex, newIndex);
+                }
+                finally { _lock.ExitWriteLock(); }
             }
             else
             {
@@ -86,11 +93,13 @@ namespace ManagedShell.Common.Common
         {
             if (_dispatcher.CheckAccess())
             {
-                if (index >= this.Count)
-                    return;
-                LockCookie c = _lock.UpgradeToWriterLock(-1);
-                base.RemoveItem(index);
-                _lock.DowngradeFromWriterLock(ref c);
+                try
+                {
+                    _lock.EnterWriteLock();
+                    if (index < Count)
+                        base.RemoveItem(index);
+                }
+                finally { _lock.ExitWriteLock(); }
             }
             else
             {
@@ -101,9 +110,12 @@ namespace ManagedShell.Common.Common
         {
             if (_dispatcher.CheckAccess())
             {
-                LockCookie c = _lock.UpgradeToWriterLock(-1);
-                base.SetItem(index, item);
-                _lock.DowngradeFromWriterLock(ref c);
+                try
+                {
+                    _lock.EnterWriteLock();
+                    base.SetItem(index, item);
+                }
+                finally { _lock.ExitWriteLock(); }
             }
             else
             {

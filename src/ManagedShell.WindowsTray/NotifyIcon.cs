@@ -197,7 +197,7 @@ namespace ManagedShell.WindowsTray
             set;
         }
 
-        private string Identifier
+        public string Identifier
         {
             get
             {
@@ -311,19 +311,23 @@ namespace ManagedShell.WindowsTray
 
         public void SetPinValues()
         {
+            var inPinnedList = false;
+
             for (int i = 0; i < _notificationArea.PinnedNotifyIcons.Length; i++)
             {
                 string item = _notificationArea.PinnedNotifyIcons[i];
                 if (IsEqualByIdentifier(item))
                 {
-                    if (!_isPinned)
-                    {
-                        _isPinned = true;
-                        OnPropertyChanged("IsPinned");
-                    }
+                    inPinnedList = true;
                     PinOrder = i;
                     break;
                 }
+            }
+
+            if (inPinnedList != _isPinned)
+            {
+                _isPinned = inPinnedList;
+                OnPropertyChanged("IsPinned");
             }
         }
 
@@ -374,6 +378,7 @@ namespace ManagedShell.WindowsTray
         #region Mouse events
 
         private DateTime _lastLClick = DateTime.Now;
+        private DateTime _lastMClick = DateTime.Now;
         private DateTime _lastRClick = DateTime.Now;
 
         public void IconMouseEnter(uint mouse)
@@ -425,6 +430,24 @@ namespace ManagedShell.WindowsTray
 
                 _lastLClick = DateTime.Now;
             }
+            else if (button == MouseButton.Middle)
+            {
+                if (handleClickOverride(false))
+                {
+                    return;
+                }
+
+                if (DateTime.Now.Subtract(_lastMClick).TotalMilliseconds <= doubleClickTime)
+                {
+                    SendMessage((uint)WM.MBUTTONDBLCLK, mouse);
+                }
+                else
+                {
+                    SendMessage((uint)WM.MBUTTONDOWN, mouse);
+                }
+
+                _lastMClick = DateTime.Now;
+            }
             else if (button == MouseButton.Right)
             {
                 if (DateTime.Now.Subtract(_lastRClick).TotalMilliseconds <= doubleClickTime)
@@ -457,6 +480,17 @@ namespace ManagedShell.WindowsTray
                 if (Version >= 3) SendMessage((uint)NIN.SELECT, mouse);
 
                 _lastLClick = DateTime.Now;
+            }
+            else if (button == MouseButton.Middle)
+            {
+                if (handleClickOverride(true))
+                {
+                    return;
+                }
+
+                SendMessage((uint)WM.MBUTTONUP, mouse);
+
+                _lastMClick = DateTime.Now;
             }
             else if (button == MouseButton.Right)
             {
@@ -514,7 +548,11 @@ namespace ManagedShell.WindowsTray
                     ShellHelper.ShowActionCenter();
                 }
 
-                return true;
+                if (!EnvironmentHelper.IsWindows1122H2OrBetter)
+                {
+                    // Some earlier Windows 11 versions have a crash when sending click events
+                    return true;
+                }
             }
 
             return false;
