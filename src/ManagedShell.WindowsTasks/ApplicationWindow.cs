@@ -301,8 +301,9 @@ namespace ManagedShell.WindowsTasks
         {
             get
             {
-                if (_hMonitor == IntPtr.Zero)
+                if (_hMonitor == IntPtr.Zero || EnvironmentHelper.IsWindows8OrBetter)
                 {
+                    // Ignore the cache on Windows 8+, as it may be wrong.
                     SetMonitor();
                 }
 
@@ -313,6 +314,10 @@ namespace ManagedShell.WindowsTasks
             {
                 if (_hMonitor != value)
                 {
+                    if (_hMonitor != IntPtr.Zero)
+                    {
+                        ShellLogger.Debug($"ApplicationWindow: Monitor changed for {Handle} ({Title})");
+                    }
                     _hMonitor = value;
                     OnPropertyChanged("HMonitor");
                 }
@@ -355,9 +360,10 @@ namespace ManagedShell.WindowsTasks
                 bool isToolWindow = (extendedWindowStyles & (int)NativeMethods.ExtendedWindowStyles.WS_EX_TOOLWINDOW) != 0;
                 bool isAppWindow = (extendedWindowStyles & (int)NativeMethods.ExtendedWindowStyles.WS_EX_APPWINDOW) != 0;
                 bool isNoActivate = (extendedWindowStyles & (int)NativeMethods.ExtendedWindowStyles.WS_EX_NOACTIVATE) != 0;
+                bool isDeleted = NativeMethods.GetProp(Handle, "ITaskList_Deleted") != IntPtr.Zero;
                 IntPtr ownerWin = NativeMethods.GetWindow(Handle, NativeMethods.GetWindow_Cmd.GW_OWNER);
 
-                return isWindow && isVisible && (ownerWin == IntPtr.Zero || isAppWindow) && (!isNoActivate || isAppWindow) && !isToolWindow;
+                return isWindow && isVisible && (ownerWin == IntPtr.Zero || isAppWindow) && (!isNoActivate || isAppWindow) && !isToolWindow && !isDeleted;
             }
         }
 
@@ -407,27 +413,41 @@ namespace ManagedShell.WindowsTasks
 
                 if (cloaked > 0)
                 {
-                    ShellLogger.Debug($"ApplicationWindow: Cloaked ({cloaked}) window ({Title}) hidden from taskbar");
+                    ShellLogger.Debug($"ApplicationWindow: Cloaked window {Handle} ({Title}) hidden from taskbar");
                     return false;
                 }
 
                 // UWP shell windows that are not cloaked should be hidden from the taskbar, too.
-                if (ClassName == "ApplicationFrameWindow" || ClassName == "Windows.UI.Core.CoreWindow" || ClassName == "StartMenuSizingFrame")
+                if (IsImmersiveShellWindow())
                 {
-                    if ((ExtendedWindowStyles & (int)NativeMethods.ExtendedWindowStyles.WS_EX_WINDOWEDGE) == 0)
-                    {
-                        ShellLogger.Debug($"ApplicationWindow: Hiding UWP non-window {Title}");
-                        return false;
-                    }
-                }
-                else if (!EnvironmentHelper.IsWindows10OrBetter && (ClassName == "ImmersiveBackgroundWindow" || ClassName == "SearchPane" || ClassName == "NativeHWNDHost" || ClassName == "Shell_CharmWindow" || ClassName == "ImmersiveLauncher") && WinFileName.ToLower().Contains("explorer.exe"))
-                {
-                    ShellLogger.Debug($"ApplicationWindow: Hiding immersive shell window {Title}");
+                    ShellLogger.Debug($"ApplicationWindow: Hiding immersive shell window {Handle} ({Title}) from taskbar");
                     return false;
                 }
             }
 
             return CanAddToTaskbar;
+        }
+
+        public bool IsImmersiveShellWindow()
+        {
+            if (!EnvironmentHelper.IsWindows8OrBetter)
+            {
+                return false;
+            }
+            
+            if (ClassName == "ApplicationFrameWindow" || ClassName == "Windows.UI.Core.CoreWindow" || ClassName == "StartMenuSizingFrame" || ClassName == "Shell_LightDismissOverlay")
+            {
+                if ((ExtendedWindowStyles & (int)NativeMethods.ExtendedWindowStyles.WS_EX_WINDOWEDGE) == 0)
+                {
+                    return true;
+                }
+            }
+            else if (!EnvironmentHelper.IsWindows10OrBetter && (ClassName == "ImmersiveBackgroundWindow" || ClassName == "SearchPane" || ClassName == "NativeHWNDHost" || ClassName == "Shell_CharmWindow" || ClassName == "ImmersiveLauncher") && WinFileName.ToLower().Contains("explorer.exe"))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private string getFileDescription()
@@ -681,6 +701,7 @@ namespace ManagedShell.WindowsTasks
 
         internal IntPtr DoClose()
         {
+            makeForeground();
             IntPtr retval = IntPtr.Zero;
             NativeMethods.SendMessageTimeout(Handle, (int)NativeMethods.WM.SYSCOMMAND, NativeMethods.SC_CLOSE, 0, 2, 200, ref retval);
 

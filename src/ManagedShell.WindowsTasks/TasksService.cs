@@ -20,8 +20,7 @@ namespace ManagedShell.WindowsTasks
 
         public event EventHandler<WindowEventArgs> WindowActivated;
         public event EventHandler<EventArgs> DesktopActivated;
-        public event EventHandler<EventArgs> FullScreenEntered;
-        public event EventHandler<EventArgs> FullScreenLeft;
+        public event EventHandler<FullScreenEventArgs> FullScreenChanged;
         public event EventHandler<WindowEventArgs> MonitorChanged;
 
         private NativeWindowEx _HookWin;
@@ -204,6 +203,8 @@ namespace ManagedShell.WindowsTasks
                 if (moveEventHook != IntPtr.Zero) UnhookWinEvent(moveEventHook);
                 _HookWin.DestroyHandle();
                 setTaskbarListHwnd(IntPtr.Zero);
+                IsInitialized = false;
+                Windows.Clear();
             }
 
             TaskCategoryProvider?.Dispose();
@@ -451,7 +452,6 @@ namespace ManagedShell.WindowsTasks
                                 {
                                     ApplicationWindow win = Windows.First(wnd => wnd.Handle == msgCopy.LParam);
                                     win.SetMonitor();
-                                    ShellLogger.Debug($"TasksService: Monitor changed for {win.Handle} ({win.Title})");
 
                                     WindowEventArgs args = new WindowEventArgs
                                     {
@@ -463,12 +463,30 @@ namespace ManagedShell.WindowsTasks
                                 break;
 
                             case HSHELL.FULLSCREENENTER:
-                                FullScreenEntered?.Invoke(this, new EventArgs());
-                                break;
+                                {
+                                    FullScreenEventArgs args = new FullScreenEventArgs
+                                    {
+                                        Handle = msgCopy.LParam,
+                                        IsEntering = true
+                                    };
+
+                                    FullScreenChanged?.Invoke(this, args);
+                                    ShellLogger.Debug($"TasksService: Full screen entered by window {msgCopy.LParam}");
+                                    break;
+                                }
 
                             case HSHELL.FULLSCREENEXIT:
-                                FullScreenLeft?.Invoke(this, new EventArgs());
-                                break;
+                                {
+                                    FullScreenEventArgs args = new FullScreenEventArgs
+                                    {
+                                        Handle = msgCopy.LParam,
+                                        IsEntering = false
+                                    };
+
+                                    FullScreenChanged?.Invoke(this, args);
+                                    ShellLogger.Debug($"TasksService: Full screen exited by window {msgCopy.LParam}");
+                                    break;
+                                }
 
                             case HSHELL.GETMINRECT:
                                 SHELLHOOKINFO minRectInfo = Marshal.PtrToStructure<SHELLHOOKINFO>(msg.LParam);
@@ -527,14 +545,13 @@ namespace ManagedShell.WindowsTasks
                         // MarkFullscreenWindow
                         // Also sends WM_SHELLHOOK message
                         ShellLogger.Debug("TasksService: ITaskbarList: MarkFullscreenWindow HWND:" + msg.LParam + " Entering? " + msg.WParam);
-                        if (msg.WParam == IntPtr.Zero)
+                        FullScreenEventArgs args = new FullScreenEventArgs
                         {
-                            FullScreenLeft?.Invoke(this, new EventArgs());
-                        }
-                        else
-                        {
-                            FullScreenEntered?.Invoke(this, new EventArgs());
-                        }
+                            Handle = msgCopy.LParam,
+                            IsEntering = msg.WParam != IntPtr.Zero
+                        };
+
+                        FullScreenChanged?.Invoke(this, args);
                         msg.Result = IntPtr.Zero;
                         return;
                     case (int)WM.USER + 64:

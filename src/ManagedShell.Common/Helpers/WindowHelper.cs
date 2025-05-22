@@ -102,14 +102,14 @@ namespace ManagedShell.Common.Helpers
         
         public static void HideWindowFromTasks(IntPtr hWnd)
         {
-            SetWindowLong(hWnd, GWL_EXSTYLE, GetWindowLong(hWnd, GWL_EXSTYLE) | (int)ExtendedWindowStyles.WS_EX_TOOLWINDOW);
+            SetWindowLong(hWnd, GWL_EXSTYLE, (GetWindowLong(hWnd, GWL_EXSTYLE) & ~(int)ExtendedWindowStyles.WS_EX_APPWINDOW) | (int)ExtendedWindowStyles.WS_EX_TOOLWINDOW);
 
             ExcludeWindowFromPeek(hWnd);
         }
 
         public static void ExcludeWindowFromPeek(IntPtr hWnd)
         {
-            int status = (int)DWMNCRENDERINGPOLICY.DWMNCRP_ENABLED;
+            int status = 1;
             DwmSetWindowAttribute(hWnd,
                 DWMWINDOWATTRIBUTE.DWMWA_EXCLUDED_FROM_PEEK,
                 ref status,
