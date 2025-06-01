@@ -11,6 +11,7 @@
     <PackageProjectUrl>https://github.com/cuiliang/ManagedShell</PackageProjectUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <Author>https://github.com/cairoshell/ManagedShell</Author>
+    <DisableInternalParallelBuild>true</DisableInternalParallelBuild>
   </PropertyGroup>
 
 
