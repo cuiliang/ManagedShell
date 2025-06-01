@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
 
   <PropertyGroup>
-    <!-- <TargetFrameworks>netcoreapp3.1;net471;net8.0-windows10.0.19041.0</TargetFrameworks> -->
+     <!-- <TargetFrameworks>net472;net8.0-windows10.0.19041.0</TargetFrameworks>  -->
     <UseWPF>True</UseWPF>
   </PropertyGroup>
 
@@ -9,11 +9,15 @@
 		<LangVersion>9</LangVersion>
 		<CsWinRTEmbedded>true</CsWinRTEmbedded>
 		<CsWinRTWindowsMetadata>10.0.19041.0</CsWinRTWindowsMetadata>
+		<EnableDefaultWinmdReferences>true</EnableDefaultWinmdReferences>
+
+		<!-- 如果你要在 net472 里使用的平台 API 只在 Win10+ 才存在，最好同步注明 -->
+		<SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
 	</PropertyGroup>
 	
   <ItemGroup>
-	<PackageReference Condition="'$(TargetFramework)' == 'net6.0-windows'" Include="Microsoft.Windows.CsWinRT" Version="1.6.4" />
-    <PackageReference Condition="'$(TargetFramework)' != 'net6.0-windows'" Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1" />
+	<!--<PackageReference Condition="'$(TargetFramework)' == 'net8.0-windows'" Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />-->
+    <PackageReference Condition="'$(TargetFramework)' != 'net8.0-windows10.0.19041.0'" Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1" />
     <PackageReference Include="System.Security.Principal.Windows" Version="5.0.0" />
   </ItemGroup>
 
@@ -50,7 +54,6 @@
 			Windows.System.ProcessorArchitecture;
 			Windows.System.User;
 			Windows.UI.Color;
-			Windows.UI.IColors;
 		</CsWinRTIncludes>
 		<CsWinRTExcludes>
 			Windows.Foundation.Diagnostics;

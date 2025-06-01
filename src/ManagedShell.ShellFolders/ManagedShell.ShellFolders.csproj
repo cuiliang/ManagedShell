@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net471'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
     <Reference Include="Microsoft.VisualBasic" />
   </ItemGroup>
 

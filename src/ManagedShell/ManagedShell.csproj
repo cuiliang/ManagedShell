@@ -5,14 +5,25 @@
     <UseWPF>true</UseWPF>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Description>A library for creating Windows shell replacements using .NET.</Description>
-    <RepositoryUrl>https://github.com/cairoshell/ManagedShell.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/cuiliang/ManagedShell.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageProjectUrl>https://github.com/cairoshell/ManagedShell</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/cuiliang/ManagedShell</PackageProjectUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Author>https://github.com/cairoshell/ManagedShell</Author>
   </PropertyGroup>
+
+
+  <PropertyGroup>
+		<PackageId>Quicker.ManagedShell</PackageId>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<SignAssembly>true</SignAssembly>
+		<AssemblyOriginatorKeyFile>d:\cert\cert2022\quicker.snk</AssemblyOriginatorKeyFile>
+    <EnableSourceLink>true</EnableSourceLink>
+	</PropertyGroup>
+
 
   <ItemGroup>
     <!-- Reference all project and package dependencies to ensure they are included in the package -->

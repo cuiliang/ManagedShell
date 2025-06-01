@@ -39,10 +39,10 @@ namespace ManagedShell.Common.Helpers
 
         public static bool SetKeyboardLayout(int layoutId)
         {
-            return NativeMethods.PostMessage(0xffff,
+            return NativeMethods.PostMessage((int)0xffff,
                 (uint) NativeMethods.WM.INPUTLANGCHANGEREQUEST,
-                0,
-                NativeMethods.LoadKeyboardLayout(layoutId.ToString("x8"), (uint)(NativeMethods.KLF.SUBSTITUTE_OK | NativeMethods.KLF.ACTIVATE)));
+                (int)0,
+                (long)NativeMethods.LoadKeyboardLayout(layoutId.ToString("x8"), (uint)(NativeMethods.KLF.SUBSTITUTE_OK | NativeMethods.KLF.ACTIVATE)));
         }
     }
 }
