@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
 
   <PropertyGroup>
-    <TargetFrameworks>netcoreapp3.1;net471;net6.0-windows</TargetFrameworks>
+    <!-- <TargetFrameworks>netcoreapp3.1;net471;net8.0-windows10.0.19041.0</TargetFrameworks> -->
     <UseWPF>True</UseWPF>
   </PropertyGroup>
 
@@ -21,6 +21,10 @@
     <ProjectReference Include="..\ManagedShell.Common\ManagedShell.Common.csproj" />
 	<ProjectReference Include="..\ManagedShell.Interop\ManagedShell.Interop.csproj" />
     <ProjectReference Include="..\ManagedShell.ShellFolders\ManagedShell.ShellFolders.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Nerdbank.GitVersioning" Version="3.7.115" />
   </ItemGroup>
 
 	<PropertyGroup>
@@ -45,6 +49,8 @@
 			Windows.System.IUser;
 			Windows.System.ProcessorArchitecture;
 			Windows.System.User;
+			Windows.UI.Color;
+			Windows.UI.IColors;
 		</CsWinRTIncludes>
 		<CsWinRTExcludes>
 			Windows.Foundation.Diagnostics;
