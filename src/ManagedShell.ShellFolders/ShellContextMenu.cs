@@ -181,10 +181,15 @@ namespace ManagedShell.ShellFolders
         /// <returns>true if the message has been handled, false otherwise</returns>
         protected override void WndProc(ref Message m)
         {
+            ulong id = Interop.LoWord(m.WParam);
+
             if (iContextMenu != null &&
                 m.Msg == (int)NativeMethods.WM.MENUSELECT &&
                 ((int)Interop.HiWord(m.WParam) & (int)MFT.SEPARATOR) == 0 &&
-                ((int)Interop.HiWord(m.WParam) & (int)MFT.POPUP) == 0)
+                ((int)Interop.HiWord(m.WParam) & (int)MFT.POPUP) == 0 &&
+                id != 0 &&
+                id != 0xFFFF
+                )
             {
                 string info = GetCommandString(
                     iContextMenu,
